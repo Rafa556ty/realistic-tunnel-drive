@@ -184,50 +184,98 @@ function buildPortal(length: number, materials: {
   return group;
 }
 
+/** Grid coordinates: a uniform step plus exact lines that must exist (portal edges, cutting floor). */
+function gridLine(from: number, to: number, step: number, must: number[]) {
+  const out: number[] = [];
+  for (let v = from; v <= to + 1e-6; v += step) if (!must.some((m) => Math.abs(m - v) < step * 0.35)) out.push(v);
+  out.push(...must.filter((m) => m > from && m < to));
+  return out.sort((p, q) => p - q);
+}
+
+const smooth01 = (t: number) => {
+  const c = Math.max(0, Math.min(1, t));
+  return c * c * (3 - 2 * c);
+};
+
+/**
+ * Mountain over the tunnel. Outside the portals the road runs through a cutting:
+ * the ground stays flat (below the road) across both carriageways and the hills
+ * rise smoothly beside them, so there are no thin vertical slivers next to the
+ * open tunnel mouths.
+ */
 function buildMountain(length: number) {
   const cx = (FACADE_L + FACADE_R) / 2;
   const core = (FACADE_R - FACADE_L) / 2 - 0.5;
-  const W = 540;
-  const D = length + 260;
-  const geo = new THREE.PlaneGeometry(W, D, 108, 110).rotateX(-Math.PI / 2);
-  const p = geo.attributes["position"] as THREE.BufferAttribute;
-  const colors: number[] = [];
+  const HALF_W = 270;
+  // Cutting floor: both bores plus their walkways.
+  const floorL = ONCOMING_BORE.outer - 1;
+  const floorR = PLAYER_BORE.outer + 1.8;
+  const xs = gridLine(cx - HALF_W, cx + HALF_W, 5, [FACADE_L, FACADE_R, floorL, floorR]);
+  const out = [0, FACADE_D, 4, 8, 13, 19, 27, 37, 49, 63, 79, 97, 116, 135];
+  const inside: number[] = [];
+  const nIn = Math.max(8, Math.round(length / 11.5));
+  for (let k = 1; k < nIn; k++) inside.push(-(length * k) / nIn);
+  const zs = [...out.map((d) => -length - d).reverse(), ...inside.reverse(), ...out];
+  zs.sort((p, q) => p - q);
+
   const grass = new THREE.Color(0x4d6a30);
   const dark = new THREE.Color(0x34482a);
   const rock = new THREE.Color(0x7b766b);
   const c = new THREE.Color();
-  const zMid = -length / 2;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i) + cx;
-    let z = p.getZ(i) + zMid;
-    const dx = Math.abs(x - cx);
-    const inside = z <= 0 && z >= -length;
-    const dIn = inside ? Math.min(-z, z + length) : 0;
-    const dOut = z > 0 ? z : z < -length ? -length - z : 0;
-    const ridge = 34 + 22 * Math.sin(z * 0.0062 + 1.1) + 9 * Math.sin(z * 0.021 + x * 0.013);
-    const side = 1 - Math.exp(-Math.max(0, dx - core) / 42);
-    const noise = (rnd(i * 0.37) - 0.5) * 2.2;
-    const portalH = FACADE_TOP + 1.5 + ridge * 0.75 * side;
-    let y: number;
-    if (inside) {
-      y = FACADE_TOP + 0.6 + Math.min(dIn * 0.55, ridge * 0.65) + ridge * 0.75 * side + noise * Math.min(1, dIn / 10);
-    } else if (dx < core) {
-      // collapse onto the top of the portal so nothing blocks the openings
-      z = z > 0 ? 0 : -length;
-      y = FACADE_TOP - 0.2;
-    } else {
-      y = Math.max(-1.5, portalH * Math.exp(-dOut / 32) - dOut * 0.05 + noise * 0.5);
+  const pos: number[] = [];
+  const colors: number[] = [];
+  let i = 0;
+  for (const z of zs) {
+    for (const x of xs) {
+      const dx = Math.abs(x - cx);
+      const isInside = z <= 0 && z >= -length;
+      const dIn = isInside ? Math.min(-z, z + length) : 0;
+      const dOut = z > 0 ? z : z < -length ? -length - z : 0;
+      const ridge = 34 + 22 * Math.sin(z * 0.0062 + 1.1) + 9 * Math.sin(z * 0.021 + x * 0.013);
+      const side = 1 - Math.exp(-Math.max(0, dx - core) / 42);
+      const noise = (rnd(i * 0.37) - 0.5) * 2.2;
+      const portalH = FACADE_TOP + 1.5 + ridge * 0.75 * side;
+      let y: number;
+      if (isInside) {
+        y = FACADE_TOP + 0.6 + Math.min(dIn * 0.55, ridge * 0.65) + ridge * 0.75 * side + noise * Math.min(1, dIn / 10);
+      } else {
+        const dist = x < floorL ? floorL - x : x > floorR ? x - floorR : 0;
+        const rise = smooth01(dist / 20);
+        const hill = portalH * Math.exp(-dOut / 32) - dOut * 0.05 + noise * 0.5 * rise;
+        y = Math.max(-1.5, -1.5 + (hill + 1.5) * rise);
+      }
+      const edge = Math.min(1, Math.max(0, (HALF_W - dx) / 60));
+      y = -2 + (y + 2) * edge;
+      pos.push(x, y, z);
+      const steep = Math.min(1, Math.abs(y - FACADE_TOP) / 45);
+      c.copy(grass)
+        .lerp(dark, rnd(i * 3.1) * 0.6)
+        .lerp(rock, steep * 0.55 + (rnd(i * 7.3) > 0.86 ? 0.35 : 0));
+      colors.push(c.r, c.g, c.b);
+      i++;
     }
-    const edge = Math.min(1, Math.max(0, (W / 2 - dx) / 60));
-    y = -2 + (y + 2) * edge;
-    p.setXYZ(i, x, y, z);
-    const steep = Math.min(1, Math.abs(y - FACADE_TOP) / 45);
-    c.copy(grass)
-      .lerp(dark, rnd(i * 3.1) * 0.6)
-      .lerp(rock, steep * 0.55 + (rnd(i * 7.3) > 0.86 ? 0.35 : 0));
-    colors.push(c.r, c.g, c.b);
   }
+  const nx = xs.length;
+  const index: number[] = [];
+  for (let r = 0; r < zs.length - 1; r++) {
+    const z0 = zs[r]!;
+    const z1 = zs[r + 1]!;
+    // The thin strip right in front of / behind each façade would join the hill top to the
+    // ground and wall off the openings: leave it out across the whole façade.
+    const portalStrip = (z0 >= 0 && z0 < FACADE_D) || (z1 <= -length && z1 > -length - FACADE_D);
+    for (let q = 0; q < nx - 1; q++) {
+      if (portalStrip && xs[q]! >= FACADE_L - 1e-6 && xs[q + 1]! <= FACADE_R + 1e-6) continue;
+      const a = r * nx + q;
+      const b2 = a + 1;
+      const d = a + nx;
+      const e = d + 1;
+      index.push(a, d, b2, b2, d, e);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(index);
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(
     geo,

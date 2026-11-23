@@ -65,9 +65,14 @@ export function PlateEditor({
   const [pending, setPending] = useState<PlateStyleId | null>(null);
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState(setting.text);
+  const typing = useRef(false);
 
   useEffect(() => setOwned(loadOwnedPlateStyles(localStorage)), []);
-  useEffect(() => setDraft(setting.text), [setting.text]);
+  // Don't overwrite what the player is typing (phone keyboards lose letters if the value is
+  // replaced mid-composition); only sync from the saved plate when the field isn't focused.
+  useEffect(() => {
+    if (!typing.current) setDraft(setting.text);
+  }, [setting.text]);
   useEffect(() => {
     setPending(null);
     setMessage("");
@@ -104,32 +109,51 @@ export function PlateEditor({
     setPending(null);
   };
 
-  const commitText = (raw: string) => {
+  const commitText = (raw: string, final = false) => {
     const t = sanitizePlateText(raw);
-    setDraft(t);
-    onChange({ ...setting, text: t });
+    if (final) setDraft(t);
+    if (t !== setting.text) onChange({ ...setting, text: t });
+  };
+  const typeText = (raw: string) => {
+    setDraft(raw.slice(0, PLATE_TEXT_MAX + 4));
+    commitText(raw);
   };
 
   return (
     <div className="flex flex-col gap-2">
-      <PlatePreview style={shown} text={draft} />
+      <PlatePreview style={shown} text={sanitizePlateText(draft)} />
 
       <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
         TEXTO DA PLACA (até {PLATE_TEXT_MAX})
         <div className="flex gap-1">
           <input
             aria-label="Texto da placa"
+            type="text"
             value={draft}
-            maxLength={PLATE_TEXT_MAX}
-            onChange={(e) => commitText(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
+            autoCapitalize="characters"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="done"
+            onFocus={() => (typing.current = true)}
+            onBlur={(e) => {
+              typing.current = false;
+              commitText(e.target.value, true);
+            }}
+            onChange={(e) => typeText(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+            onKeyUp={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             className="h-8 w-full flex-1 rounded-sm border border-hud-border bg-card px-2 font-display text-foreground uppercase"
             style={{ fontSize: 18, letterSpacing: "0.18em" }}
           />
           <button
             type="button"
             className={`${BTN} h-8 border-hud-border bg-card px-2 text-[10px]`}
-            onClick={() => commitText(defaultPlateText(`${carId}-${Date.now()}`))}
+            onClick={() => commitText(defaultPlateText(`${carId}-${Date.now()}`), true)}
           >
             SORTEAR
           </button>

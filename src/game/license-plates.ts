@@ -15,6 +15,7 @@ import {
 import {
   getPlateStyle,
   plateMountFor,
+  type PlateMount,
   type PlateSetting,
   type PlateStyle,
 } from "./plate-rules";
@@ -158,6 +159,36 @@ interface MountPoint {
   depth: number; // outward distance along the car axis
   pitch: number;
   y: number;
+  x: number;
+}
+
+/** Names the car models use for the plates they ship with (hidden, but they mark the real plate spot). */
+const MODEL_PLATE_RE = /LicensePlate|ManufacturerPlate|license_plate|number_?plate|^Plate$/i;
+
+function isModelPlate(m: Mesh): boolean {
+  if (m.userData["licensePlate"]) return false;
+  const mats = Array.isArray(m.material) ? m.material : [m.material];
+  return MODEL_PLATE_RE.test(m.name) || mats.some((x) => x && MODEL_PLATE_RE.test(x.name));
+}
+
+/** Where the model's own plate sits on one side (car-local), if it has one. */
+function modelPlateSpot(car: Object3D, side: "rear" | "front") {
+  car.updateMatrixWorld(true);
+  const toLocal = new Matrix4().copy(car.matrixWorld).invert();
+  const box = new Box3();
+  car.traverse((o) => {
+    const m = o as Mesh;
+    if (!m.isMesh || !isModelPlate(m)) return;
+    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+    const b = m.geometry.boundingBox!.clone().applyMatrix4(
+      new Matrix4().multiplyMatrices(toLocal, m.matrixWorld),
+    );
+    const cz = (b.min.z + b.max.z) / 2;
+    if ((side === "rear" ? cz > 0.5 : cz < -0.5) && b.max.y - b.min.y < 0.4) box.union(b);
+  });
+  if (box.isEmpty()) return null;
+  const c = box.getCenter(new Vector3());
+  return { x: c.x, y: c.y, depth: side === "rear" ? box.max.z : -box.min.z };
 }
 
 function isVisible(o: Object3D | null): boolean {
@@ -179,7 +210,7 @@ function solidMeshes(car: Object3D): Mesh[] {
 }
 
 /** Casts a small grid of rays at the bumper to find where the plate rests. */
-function findMount(car: Object3D, side: "rear" | "front", y: number): MountPoint {
+function findMount(car: Object3D, side: "rear" | "front", y: number, x = 0): MountPoint {
   car.updateMatrixWorld(true);
   const toLocal = new Matrix4().copy(car.matrixWorld).invert();
   const box = new Box3();
@@ -196,32 +227,39 @@ function findMount(car: Object3D, side: "rear" | "front", y: number): MountPoint
   const dirWorld = new Vector3(0, 0, -sign).transformDirection(car.matrixWorld);
   const ray = new Raycaster();
   ray.far = 3;
-  const rows: number[][] = [];
-  const dy = 0.05;
-  for (const oy of [dy, 0, -dy]) {
-    const row: number[] = [];
-    for (const ox of [-0.11, -0.04, 0.04, 0.11]) {
-      const origin = car.localToWorld(new Vector3(ox, y + oy, start));
-      ray.set(origin, dirWorld);
-      const hit = ray.intersectObjects(meshes, false)[0];
-      if (hit) row.push(sign * car.worldToLocal(hit.point.clone()).z);
-    }
-    rows.push(row);
-  }
-  const fallback = side === "rear" ? box.max.z : -box.min.z;
-  const all = rows.flat();
-  if (!all.length) return { depth: fallback, pitch: 0, y };
+  // Sample the whole plate footprint so it never ends up buried in a bumper lip or diffuser.
+  const ys = [0.07, 0.035, 0, -0.035, -0.07];
+  const hits: { oy: number; d: number }[] = [];
+  const rowMedian: (number | null)[] = [];
   const median = (a: number[]) => {
     const s = [...a].sort((p, q) => p - q);
     return s[Math.floor(s.length / 2)]!;
   };
-  const m = median(all);
-  const near = all.filter((d) => Math.abs(d - m) < 0.06);
-  const depth = Math.max(...near);
-  const top = rows[0]!.length ? median(rows[0]!) : m;
-  const bottom = rows[2]!.length ? median(rows[2]!) : m;
-  const pitch = Math.max(-0.45, Math.min(0.45, Math.atan2(top - bottom, dy * 2)));
-  return { depth, pitch, y };
+  for (const oy of ys) {
+    const row: number[] = [];
+    for (const ox of [-0.14, -0.07, 0, 0.07, 0.14]) {
+      const origin = car.localToWorld(new Vector3(x + ox, y + oy, start));
+      ray.set(origin, dirWorld);
+      const hit = ray.intersectObjects(meshes, false)[0];
+      if (!hit) continue;
+      const d = sign * car.worldToLocal(hit.point.clone()).z;
+      row.push(d);
+      hits.push({ oy, d });
+    }
+    rowMedian.push(row.length ? median(row) : null);
+  }
+  const fallback = side === "rear" ? box.max.z : -box.min.z;
+  if (!hits.length) return { depth: fallback, pitch: 0, y, x };
+  const m = median(hits.map((h) => h.d));
+  const top = rowMedian[0] ?? rowMedian[1] ?? m;
+  const bottom = rowMedian[4] ?? rowMedian[3] ?? m;
+  const pitch = Math.max(-0.22, Math.min(0.22, Math.atan2(top - bottom, 0.14)));
+  const tp = Math.tan(pitch);
+  // Plate plane depth at offset oy is depth + oy * tan(pitch); keep it in front of every
+  // body hit in its footprint, ignoring far-out parts (wings, fins) and deep holes.
+  let depth = m;
+  for (const h of hits) if (h.d < m + 0.3 && h.d > m - 0.25) depth = Math.max(depth, h.d - h.oy * tp);
+  return { depth, pitch, y, x };
 }
 
 /** Hides plates that ship with some models so only ours shows. */
@@ -230,7 +268,8 @@ function hideModelPlates(car: Object3D) {
     const m = o as Mesh;
     if (!m.isMesh || m.userData["licensePlate"]) return;
     const mats = Array.isArray(m.material) ? m.material : [m.material];
-    if (mats.some((x) => x && /LicensePlate|^Plate$/i.test(x.name))) m.visible = false;
+    if (isModelPlate(m) || mats.some((x) => x && /LicensePlate|^Plate$/i.test(x.name)))
+      m.visible = false;
   });
 }
 
@@ -239,6 +278,19 @@ function removePlates(car: Object3D) {
   if (!old) return;
   old.traverse((o) => (o.userData["dispose"] as (() => void) | undefined)?.());
   old.removeFromParent();
+}
+
+/** Prefers the spot of the plate the model ships with; else the researched height + bumper raycast. */
+function mountFor(car: Object3D, side: "rear" | "front", mount: PlateMount): MountPoint {
+  const spot = modelPlateSpot(car, side);
+  if (spot) {
+    const ray = findMount(car, side, spot.y, spot.x);
+    // Sit on the model's plate face; never sink behind the bumper the rays found.
+    const depth = Math.abs(ray.depth - spot.depth) < 0.08 ? Math.max(ray.depth, spot.depth) : spot.depth;
+    return { depth, pitch: ray.pitch, y: spot.y, x: spot.x };
+  }
+  const y = side === "rear" ? mount.rear : (mount.front as number);
+  return findMount(car, side, y);
 }
 
 /** Puts (or refreshes) the rear and optional front plate on a car. */
@@ -253,14 +305,13 @@ export function applyLicensePlates(car: Object3D, carId: string, setting: PlateS
   const sides: ("rear" | "front")[] = ["rear"];
   if (setting.front && mount.front !== null) sides.push("front");
   for (const side of sides) {
-    const y = side === "rear" ? mount.rear : (mount.front as number);
-    const key = `${side}:${y}`;
-    const point = (cache[key] ??= findMount(car, side, y));
+    const key = `${side}:v4`;
+    const point = (cache[key] ??= mountFor(car, side, mount));
     const plate = makePlateMesh(style, setting.text);
     plate.traverse((o) => (o.userData["licensePlate"] = true));
     plate.rotation.order = "YXZ";
     plate.rotation.set(point.pitch, side === "rear" ? 0 : Math.PI, 0);
-    plate.position.set(0, point.y, (side === "rear" ? 1 : -1) * point.depth);
+    plate.position.set(point.x, point.y, (side === "rear" ? 1 : -1) * point.depth);
     group.add(plate);
   }
   car.add(group);

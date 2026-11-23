@@ -2223,11 +2223,11 @@ function dr({
                   .transformDirection(b.matrixWorld)
                   .setY(0)
                   .normalize();
-                (t.addScaledVector(new o.Vector3(-t.z, 0, t.x), 0.3),
-                  t.setY(0.2).normalize(),
+                (t.addScaledVector(new o.Vector3(-t.z, 0, t.x), 0.18),
+                  t.setY(0.14).normalize(),
                   M && clearTimeout(M),
                   (j.autoRotate = !1),
-                  (camGoal = j.target.clone().addScaledVector(t, A * 0.62)));
+                  (camGoal = j.target.clone().addScaledVector(t, A * 0.8)));
               }));
             let N = new ResizeObserver(() => {
               let e = Math.max(1, a.clientWidth),
@@ -2245,8 +2245,25 @@ function dr({
             let fe = () => {
               ((t = requestAnimationFrame(fe)),
                 camGoal &&
-                  (g.position.lerp(camGoal, 0.14),
-                  g.position.distanceTo(camGoal) < 0.005 && (camGoal = null)),
+                  (() => {
+                    // Orbit around the car to the new view instead of cutting through it.
+                    let cur = new o.Spherical().setFromVector3(
+                        g.position.clone().sub(j.target),
+                      ),
+                      goal = new o.Spherical().setFromVector3(
+                        camGoal.clone().sub(j.target),
+                      ),
+                      dT = goal.theta - cur.theta;
+                    dT = ((((dT + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI;
+                    let k = 0.12;
+                    ((cur.theta += dT * k),
+                      (cur.phi += (goal.phi - cur.phi) * k),
+                      (cur.radius += (goal.radius - cur.radius) * k),
+                      g.position
+                        .copy(j.target)
+                        .add(new o.Vector3().setFromSpherical(cur)),
+                      g.position.distanceTo(camGoal) < 0.005 && (camGoal = null));
+                  })(),
                 j.update(),
                 p.render(h, g));
             };
@@ -5152,6 +5169,8 @@ var ki = 3.5,
         (this.shadow = this.makeShadow()),
         (this.smokeDark = this.makeSmoke(55, 55, 58)),
         (this.smokeLight = this.makeSmoke(185, 185, 188)));
+      // Dev-only handle for scripted checks (teleport, inspect state).
+      import.meta.env.DEV && typeof window < `u` && (window.__game = this);
     }
     setBottomInset(e) {
       ((this.bottomInset = e), this.W && this.layout());
