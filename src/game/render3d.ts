@@ -93,6 +93,8 @@ import {
 } from "./world";
 import { n as Ve, t as He } from "./quality";
 import { buildTwinTunnel, sweep as tunnelSweep } from "./twin-tunnel";
+import { buildQuadLeds, ledGlow } from "./chiron-lights";
+import { CarDamage } from "./car-damage";
 import { createCity, createTrees } from "./scenery";
 import {
   BRIDGE_END,
@@ -1586,6 +1588,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.engineBrakeLight = null),
         (this.wing = void 0),
         (this.chironRig = null),
+        (this.quadLeds = null),
         (this.steeringWheel = null),
         (this.cabinOnly = []),
         (this.playerKey = e));
@@ -1647,8 +1650,16 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.wingBaseY = this.wing?.position.y ?? 0),
         (this.wingRise = 0.14),
         (this.player = e),
+        (this.quadLeds = this.makeQuadLeds(e)),
         this.scene.add(e),
         (this.canvas.dataset.playerCar = `chiron`));
+    }
+    makeQuadLeds(e) {
+      try {
+        return buildQuadLeds(e, this.playerKey);
+      } catch (t) {
+        return (console.warn(`quad leds`, t), null);
+      }
     }
     low = Ve({
       userAgent: navigator.userAgent,
@@ -1716,6 +1727,8 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
     gantries = [];
     radars = [];
     player = null;
+    quadLeds = null;
+    damage = null;
     wing;
     steeringWheel = null;
     revDash = null;
@@ -1762,6 +1775,8 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
     ready = !1;
     constructor(e, t, i) {
       ((this.canvas = e), (this.overlay = t), (this.onReady = i));
+      // Dev-only handle for scripted visual checks (camera views).
+      import.meta.env.DEV && (window.__r3d = this);
       let a = Math.min(window.devicePixelRatio || 1, this.low ? 1 : 1.5);
       ((this.baseDpr = a),
         (this.renderer = new le({
@@ -2468,6 +2483,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.wing = n.getObjectByName(`active-wing`)),
         (this.wingBaseY = this.wing?.position.y ?? 0.96),
         (this.wingRise = this.playerKey === `revuelto` ? It : 0.17),
+        (this.quadLeds = this.makeQuadLeds(n)),
         this.scene.add(n));
     }
     setupRealLamps(t, n) {
@@ -2884,10 +2900,14 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         for (let e of this.playerBrakeOnly) e.emissiveIntensity = r ? 4 : 0;
         if (this.playerKey === `chiron`) {
           for (let e of this.playerTail)
-            e.emissiveIntensity = r ? 2.6 : u ? 1.5 : 0.2;
-          for (let e of this.playerHead) e.emissiveIntensity = u ? 3.8 : 0.6;
+            e.emissiveIntensity = r ? 2.6 : u ? (l ? 0.9 : 1.5) : 0.2;
+          for (let e of this.playerHead)
+            e.emissiveIntensity = this.quadLeds ? 0.3 : u ? (l ? 1.6 : 3) : 0.6;
         } else {
           let e = Ot(u, r, Dt.has(this.playerKey));
+          // Lit tunnel: lamps read as on, not as floodlights.
+          l && u && !r && ((e.head *= 0.5), (e.tail *= 0.55));
+          this.quadLeds && (e.head = Math.min(e.head, 0.35));
           for (let t of this.playerTail) t.emissiveIntensity = e.tail;
           for (let t of this.playerHead) t.emissiveIntensity = e.head;
           for (let t of this.playerBrakeOnly) t.emissiveIntensity = e.brake;
@@ -2903,25 +2923,32 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
                 ? r
                   ? 0.65
                   : u
-                    ? 0.44
+                    ? l
+                      ? 0.2
+                      : 0.4
                     : i
                       ? 0
                       : 0.035
-                : u
-                  ? 0.35
-                  : i
-                    ? 0
-                    : 0.015),
+                : this.quadLeds
+                  ? 0
+                  : u
+                    ? l
+                      ? 0.1
+                      : 0.3
+                    : i
+                      ? 0
+                      : 0.015),
             (e.visible = e.material.opacity > 0));
         this.roadBeamMesh &&
           ((this.roadBeamMesh.visible = u),
           (this.roadBeamMesh.material.opacity = e.highBeam
-            ? 0.85
+            ? 0.8
             : l
-              ? 0.72
-              : 0.52));
+              ? 0.16
+              : 0.5));
         for (let e of t.children) e.name === `road-beam` && (e.visible = u);
-        let a = e.highBeam ? 260 : u ? 140 : 0;
+        let a = e.highBeam ? 240 : u ? (l ? 45 : 130) : 0;
+        this.quadLeds?.setGlow(ledGlow(u, l, e.highBeam));
         ((this.headL.intensity = this.headR.intensity = a),
           (this.headL.distance = this.headR.distance = e.highBeam ? 160 : 90));
         let d = ct(this.time, c);
@@ -2933,10 +2960,10 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
           for (let t of [e.front, e.rear, e.frontGlow, e.rearGlow])
             (t.setMatrixAt(0, this.playerLocal),
               (t.instanceMatrix.needsUpdate = !0));
-          ((e.front.material.opacity = u ? 1 : 0.18),
+          ((e.front.material.opacity = this.quadLeds ? 0 : u ? 1 : 0.18),
             (e.rear.material.opacity = r ? 1 : u ? 0.8 : 0),
-            (e.frontGlow.material.opacity = u ? 0.35 : 0),
-            (e.rearGlow.material.opacity = r ? 0.5 : u ? 0.25 : 0),
+            (e.frontGlow.material.opacity = this.quadLeds ? 0 : u ? 0.35 : 0),
+            (e.rearGlow.material.opacity = r ? 0.5 : u ? (l ? 0.12 : 0.25) : 0),
             e.wiper.pivots.forEach((t, n) =>
               e.wipers.setMatrixAt(
                 n,
@@ -3039,6 +3066,13 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
               ),
             );
           }
+          if (f) {
+            this.wingQuat.identity();
+            for (let { mesh: e } of f.parts)
+              (this.wingLocal.compose(f.pivot, this.wingQuat, this.unitScale),
+                this.wingWorld.multiplyMatrices(this.matrix, this.wingLocal),
+                e.setMatrixAt(o, this.wingWorld));
+          }
           o++;
         }
         for (let e of f ? [...r, ...f.parts.map((e) => e.mesh)] : r)
@@ -3048,10 +3082,10 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         let p = this.trafficLights.get(t);
         if (p) {
           let e = st(u);
-          ((p.front.material.opacity = e.front),
-            (p.rear.material.opacity = e.rear),
-            (p.frontGlow.material.opacity = e.glow * (l ? 0.9 : 0.75)),
-            (p.rearGlow.material.opacity = e.glow * 0.6));
+          ((p.front.material.opacity = e.front * (l ? 0.85 : 1)),
+            (p.rear.material.opacity = e.rear * (l ? 0.8 : 1)),
+            (p.frontGlow.material.opacity = e.glow * (l ? 0.28 : 0.7)),
+            (p.rearGlow.material.opacity = e.glow * (l ? 0.3 : 0.6)));
           for (let e of p.all)
             ((e.count = e === p.wipers ? o * 2 : o),
               (e.instanceMatrix.needsUpdate = !0));
