@@ -94,7 +94,6 @@ import {
 import { n as Ve, t as He } from "./quality";
 import { buildTwinTunnel, sweep as tunnelSweep } from "./twin-tunnel";
 import { buildQuadLeds, ledGlow } from "./chiron-lights";
-import { CarDamage } from "./car-damage";
 import { createCity, createTrees } from "./scenery";
 import {
   BRIDGE_END,

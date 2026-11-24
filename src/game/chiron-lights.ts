@@ -189,12 +189,12 @@ export function buildQuadLeds(car: THREE.Object3D, carKey: string) {
   });
   const group = new THREE.Group();
   group.name = "quad-led-headlights";
-  group.userData.noDamage = true;
+  group.userData["noDamage"] = true;
   const face = new THREE.Mesh(faceGeo, faceMat);
   const glow = new THREE.Mesh(glowGeo, glowMat);
   face.renderOrder = 3;
   glow.renderOrder = 4;
-  face.userData.noDamage = glow.userData.noDamage = true;
+  face.userData["noDamage"] = glow.userData["noDamage"] = true;
   group.add(face, glow);
   car.add(group);
   return {
