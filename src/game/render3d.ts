@@ -93,6 +93,14 @@ import {
 } from "./world";
 import { n as Ve, t as He } from "./quality";
 import { buildTwinTunnel, sweep as tunnelSweep } from "./twin-tunnel";
+import {
+  GRAPHICS_EVENT,
+  GRAPHICS_PROFILES,
+  GraphicsPipeline,
+  graphicsPixelRatio,
+  isGraphicsLevel,
+  loadGraphicsLevel,
+} from "./graphics-quality";
 import { buildQuadLeds, ledGlow } from "./chiron-lights";
 import { createCity, createTrees } from "./scenery";
 import {
@@ -1776,7 +1784,12 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
       ((this.canvas = e), (this.overlay = t), (this.onReady = i));
       // Dev-only handle for scripted visual checks (camera views).
       import.meta.env.DEV && (window.__r3d = this);
-      let a = Math.min(window.devicePixelRatio || 1, this.low ? 1 : 1.5);
+      this.gfxLevel = loadGraphicsLevel(localStorage, this.low);
+      let a = graphicsPixelRatio(
+        this.gfxLevel,
+        window.devicePixelRatio || 1,
+        this.low,
+      );
       ((this.baseDpr = a),
         (this.renderer = new le({
           canvas: e,
@@ -1792,6 +1805,14 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.renderer.shadowMap.enabled = !this.low),
         (this.renderer.localClippingEnabled = !0),
         (this.renderer.shadowMap.type = 1),
+        (this.gfx = new GraphicsPipeline(
+          this.renderer,
+          this.scene,
+          this.camera,
+        )),
+        (this.onGfxChange = (e) =>
+          isGraphicsLevel(e.detail) && this.setGraphics(e.detail)),
+        window.addEventListener(GRAPHICS_EVENT, this.onGfxChange),
         (this.fog = new h(11127784, 60, 250)),
         (this.scene.fog = this.fog),
         (this.scene.background = this.sky));
@@ -1828,6 +1849,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.sun = new d(16773596, 2.4)),
         (this.sun.castShadow = !0),
         this.sun.shadow.mapSize.set(1024, 1024));
+      this.setGraphics(this.gfxLevel);
       let s = this.sun.shadow.camera;
       ((s.left = -14),
         (s.right = 14),
@@ -2751,10 +2773,38 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         this.scene.add(u),
         this.trafficSignals.set(e, u));
     }
+    setGraphics(e) {
+      let t = GRAPHICS_PROFILES[e];
+      ((this.gfxLevel = e),
+        (this.canvas.dataset.gfx = e),
+        (this.baseDpr = graphicsPixelRatio(
+          e,
+          window.devicePixelRatio || 1,
+          this.low,
+        )),
+        this.renderer.setPixelRatio(this.baseDpr * this.quality.scale),
+        this.renderer.setSize(this.width, this.height, !1));
+      let n = this.sun?.shadow;
+      n &&
+        n.mapSize.x !== t.shadowMapSize &&
+        (n.mapSize.set(t.shadowMapSize, t.shadowMapSize),
+        n.map?.dispose(),
+        (n.map = null));
+      let r = Math.min(
+        this.low ? Math.min(t.anisotropy, 4) : t.anisotropy,
+        this.renderer.capabilities.getMaxAnisotropy(),
+      );
+      for (let e of [this.roadMat?.map, this.roadDetail, this.grassTex])
+        e &&
+          e.anisotropy !== r &&
+          ((e.anisotropy = r), (e.needsUpdate = !0));
+      (this.gfx.setLevel(e), this.gfx.setSize(this.width, this.height));
+    }
     resize(e, t) {
       ((this.width = e),
         (this.height = t),
         this.renderer.setSize(e, t, !1),
+        this.gfx.setSize(e, t),
         (this.camera.aspect = e / t),
         this.camera.updateProjectionMatrix());
     }
@@ -2774,7 +2824,8 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         this.low &&
         this.quality.sample((t - this.lastFrame) / 1e3, document.hidden) &&
         (this.renderer.setPixelRatio(this.baseDpr * this.quality.scale),
-        this.renderer.setSize(this.width, this.height, !1)),
+        this.renderer.setSize(this.width, this.height, !1),
+        this.gfx.setSize(this.width, this.height)),
         (this.lastFrame = t));
       let n = Math.min(e.dt, 0.05);
       this.time += n;
@@ -3182,7 +3233,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
       }
       (this.overlay &&
         (this.overlay.style.opacity = String(Math.min(0.6, e.flash * 0.6))),
-        this.renderer.render(this.scene, this.camera),
+        this.gfx.render(),
         !this.ready &&
           this.player &&
           this.canvas.dataset.modelsReady === `true` &&
@@ -3482,6 +3533,8 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         this.daySky.dispose(),
         this.contactTex.dispose(),
         this.roadTex.dispose(),
+        window.removeEventListener(GRAPHICS_EVENT, this.onGfxChange),
+        this.gfx.dispose(),
         this.renderer.dispose(),
         this.scene.traverse((e) => {
           e.geometry?.dispose?.();

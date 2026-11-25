@@ -68,6 +68,10 @@ import {
   y as ye,
 } from "./world";
 import { n as be } from "./quality";
+import {
+  loadGraphicsLevel,
+  setGraphicsLevel,
+} from "./graphics-quality";
 var xe = (...e) =>
     e
       .filter((e, t, n) => !!e && e.trim() !== `` && n.indexOf(e) === t)
@@ -7570,6 +7574,7 @@ function Qi() {
     [Ct, wt] = (0, L.useState)(!1),
     [Tt, Et] = (0, L.useState)(!1),
     [Dt, Ot] = (0, L.useState)(`auto`),
+    [gfxLevel, setGfxLevel] = (0, L.useState)(`original`),
     [kt, At] = (0, L.useState)(`touch`),
     [jt, Mt] = (0, L.useState)(`landscape`),
     B = ce(Dt, kt) === `pc`,
@@ -7579,6 +7584,17 @@ function Qi() {
   (0, L.useEffect)(() => {
     let e = localStorage.getItem(`ui-pref`);
     (e === `pc` || e === `touch` || e === `auto`) && Ot(e);
+    setGfxLevel(
+      loadGraphicsLevel(
+        localStorage,
+        be({
+          userAgent: navigator.userAgent,
+          memory: navigator.deviceMemory,
+          cores: navigator.hardwareConcurrency || 4,
+          touch: navigator.maxTouchPoints > 0,
+        }),
+      ),
+    );
     let t = window.matchMedia(`(pointer: coarse)`),
       n = () => {
         (At(
@@ -8885,6 +8901,38 @@ function Qi() {
                   (0, q.jsxs)(`div`, {
                     className: `mt-4`,
                     children: [
+                      (0, q.jsx)(`p`, {
+                        className: `mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground`,
+                        children: `Gráficos / Graphics`,
+                      }),
+                      (0, q.jsx)(`div`, {
+                        className: `mb-3 grid grid-cols-3 gap-2`,
+                        children: [
+                          [`best`, `Melhor`],
+                          [`medium`, `Médio`],
+                          [`original`, `Original`],
+                        ].map(([e, t]) =>
+                          (0, q.jsx)(
+                            `button`,
+                            {
+                              type: `button`,
+                              "aria-pressed": gfxLevel === e,
+                              onClick: () => {
+                                (setGfxLevel(e),
+                                  setGraphicsLevel(localStorage, e));
+                              },
+                              className: K(
+                                `rounded border px-2 py-2 text-xs font-bold`,
+                                gfxLevel === e
+                                  ? `border-primary bg-primary/20 text-primary`
+                                  : `border-hud-border bg-secondary/50 text-foreground/90`,
+                              ),
+                              children: t,
+                            },
+                            e,
+                          ),
+                        ),
+                      }),
                       (0, q.jsx)(`p`, {
                         className: `mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground`,
                         children: `Controles / Controls`,

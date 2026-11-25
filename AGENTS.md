@@ -35,3 +35,4 @@ use the editor.
 - Map layout distances (loop length, highway/tunnel/bridge spans, oncoming-carriageway offsets) live in `src/game/highway-layout.ts` with tests in `highway-layout.test.ts`. Why: render code and tests share one source of truth.
 - Game media (GLB models, audio, images) are Lovable Assets pointers in `src/game/assets/`; code references their CDN URLs. Why: keeps 150 MB of binaries out of the repo.
 - `src/styles.css` is the original game's compiled Tailwind output, not a Tailwind source file. Why: the UI was ported as compiled CSS; new utility classes will not be generated unless Tailwind is re-enabled there.
+- Graphics quality levels (original/medium/best) live in `src/game/graphics-quality.ts`; `Scene3D` draws through its `GraphicsPipeline`, and the `original` level must stay a direct render with no post-processing. Why: players can always fall back to the untouched look on weak phones.
