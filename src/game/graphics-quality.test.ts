@@ -4,6 +4,7 @@ import {
   defaultGraphicsLevel,
   graphicsPixelRatio,
   loadGraphicsLevel,
+  motionBlurAmount,
 } from "./graphics-quality";
 
 const store = (v: string | null) => ({ getItem: () => v });
@@ -31,5 +32,11 @@ describe("graphics quality options", () => {
     expect(loadGraphicsLevel(store("medium"), false)).toBe("medium");
     expect(loadGraphicsLevel(store("best"), true)).toBe("best");
     expect(loadGraphicsLevel(store("ultra"), true)).toBe("original");
+  });
+  it("speed blur: none on original or when slow, full on best at 320 km/h", () => {
+    expect(motionBlurAmount("original", 350)).toBe(0);
+    expect(motionBlurAmount("best", 60)).toBe(0);
+    expect(motionBlurAmount("best", 320)).toBe(1);
+    expect(motionBlurAmount("medium", 320)).toBe(0.5);
   });
 });

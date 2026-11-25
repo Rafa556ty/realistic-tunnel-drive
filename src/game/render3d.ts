@@ -3233,6 +3233,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
       }
       (this.overlay &&
         (this.overlay.style.opacity = String(Math.min(0.6, e.flash * 0.6))),
+        this.gfx.setSpeed(e.player?.speed ?? 0, n),
         this.gfx.render(),
         !this.ready &&
           this.player &&

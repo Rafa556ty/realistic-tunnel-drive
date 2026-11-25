@@ -41,6 +41,8 @@ export interface GraphicsProfile {
   contrast: number;
   saturation: number;
   vignette: number;
+  /** Strength of the speed blur at the screen edges (0 = off). */
+  motionBlur: number;
 }
 
 export const GRAPHICS_PROFILES: Record<GraphicsLevel, GraphicsProfile> = {
@@ -56,6 +58,7 @@ export const GRAPHICS_PROFILES: Record<GraphicsLevel, GraphicsProfile> = {
     contrast: 1,
     saturation: 1,
     vignette: 0,
+    motionBlur: 0,
   },
   medium: {
     post: true,
@@ -69,6 +72,7 @@ export const GRAPHICS_PROFILES: Record<GraphicsLevel, GraphicsProfile> = {
     contrast: 1.06,
     saturation: 1.08,
     vignette: 0.18,
+    motionBlur: 0.5,
   },
   best: {
     post: true,
@@ -79,9 +83,10 @@ export const GRAPHICS_PROFILES: Record<GraphicsLevel, GraphicsProfile> = {
     ambientOcclusion: true,
     shadowMapSize: 4096,
     anisotropy: 16,
-    contrast: 1.1,
-    saturation: 1.12,
+    contrast: 1.07,
+    saturation: 1.1,
     vignette: 0.26,
+    motionBlur: 1,
   },
 };
 
@@ -131,12 +136,19 @@ export function graphicsPixelRatio(
   return Math.min(devicePixelRatio || 1, lowDevice ? p.dprCapLow : p.dprCap);
 }
 
+/** 0 below 90 km/h, rising to the level's full strength at 320 km/h. */
+export function motionBlurAmount(level: GraphicsLevel, kmh: number): number {
+  const t = Math.max(0, Math.min(1, (kmh - 90) / 230));
+  return GRAPHICS_PROFILES[level].motionBlur * t * t * (3 - 2 * t);
+}
+
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     contrast: { value: 1 },
     saturation: { value: 1 },
     vignette: { value: 0 },
+    motion: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -149,12 +161,27 @@ const GradeShader = {
     uniform float contrast;
     uniform float saturation;
     uniform float vignette;
+    uniform float motion;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
+      // Speed blur: streak the picture away from the vanishing point, leaving
+      // the car and the road ahead sharp, like a racing-game chase camera.
+      vec2 toC = vec2(0.5, 0.56) - vUv;
+      float edge = smoothstep(0.18, 0.75, length(toC * vec2(1.0, 1.25)));
+      float amt = motion * edge * 0.085;
+      if (amt > 0.0005) {
+        vec3 acc = c.rgb;
+        for (int i = 1; i < 8; i++) {
+          acc += texture2D(tDiffuse, vUv + toC * amt * (float(i) / 7.0)).rgb;
+        }
+        c.rgb = acc / 8.0;
+      }
       float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
       vec3 rgb = mix(vec3(l), c.rgb, saturation);
       rgb = (rgb - 0.5) * contrast + 0.5;
+      // soft filmic toe: keep shadows readable instead of crushed
+      rgb = max(rgb, vec3(0.0)) * 0.985 + 0.015 * (contrast - 1.0) * 6.0;
       // gentle warm highlights / cool shadows, like a racing-game grade
       rgb += (l - 0.5) * vec3(0.018, 0.004, -0.02);
       vec2 d = vUv - 0.5;
@@ -174,6 +201,8 @@ export class GraphicsPipeline {
   private composer: EffectComposer | null = null;
   private width = 1;
   private height = 1;
+  private grade: ShaderPass | null = null;
+  private motion = 0;
 
   constructor(
     private renderer: WebGLRenderer,
@@ -242,6 +271,7 @@ export class GraphicsPipeline {
     grade.uniforms["saturation"]!.value = p.saturation;
     grade.uniforms["vignette"]!.value = p.vignette;
     composer.addPass(grade);
+    this.grade = grade;
     this.composer = composer;
     this.setSize(this.width, this.height);
   }
@@ -255,6 +285,15 @@ export class GraphicsPipeline {
     this.composer.setSize(this.width, this.height);
   }
 
+  /** Feed the car's speed each frame; drives the edge motion blur. */
+  setSpeed(kmh: number, dt: number): void {
+    const p = GRAPHICS_PROFILES[this.level];
+    const target = motionBlurAmount(this.level, kmh);
+    this.motion += (target - this.motion) * Math.min(1, dt * 4);
+    if (this.grade && p.motionBlur > 0)
+      this.grade.uniforms["motion"]!.value = this.motion;
+  }
+
   render(): void {
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
@@ -266,6 +305,7 @@ export class GraphicsPipeline {
     for (const pass of c.passes) pass.dispose?.();
     c.dispose();
     this.composer = null;
+    this.grade = null;
   }
 
   dispose(): void {
