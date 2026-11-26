@@ -24,9 +24,9 @@ describe("graphics quality options", () => {
     expect(graphicsPixelRatio("original", 3, false)).toBe(1.5);
     expect(graphicsPixelRatio("original", 3, true)).toBe(1);
   });
-  it("weak phones (Galaxy A11) start on original, others on best", () => {
+  it("every device starts on original", () => {
     expect(defaultGraphicsLevel(true)).toBe("original");
-    expect(defaultGraphicsLevel(false)).toBe("best");
+    expect(defaultGraphicsLevel(false)).toBe("original");
   });
   it("remembers the player's choice and ignores junk", () => {
     expect(loadGraphicsLevel(store("medium"), false)).toBe("medium");

@@ -10,6 +10,7 @@ const e = (m) => m;
 const t = () => __JSX;
 const n = () => __React;
 const r = (fn) => fn();
+import { GUARDRAIL_LIMIT, BUMPER_HANGS_AT, railImpact } from "./vehicle-dynamics";
 import {
   C as i,
   D as a,
@@ -4846,6 +4847,35 @@ var ti = (e, t) =>
           o.gain.setValueAtTime(0.16 * 0.7, t + e + n),
           o.gain.linearRampToValueAtTime(0, t + e + n + 0.04));
     }
+    // Metal-on-metal bang for a guardrail hit, scaled by severity (0..1).
+    railHit(e) {
+      if (!this.ctx || !this.master) return;
+      let t = this.ctx,
+        n = t.currentTime,
+        r = 0.25 + 0.75 * e,
+        i = Math.floor(t.sampleRate * 0.6),
+        a = t.createBuffer(1, i, t.sampleRate),
+        o = a.getChannelData(0);
+      for (let e = 0; e < i; e++)
+        o[e] = (Math.random() * 2 - 1) * (1 - e / i) ** 2.2;
+      for (let [e, i] of [
+        [180, 0.9],
+        [760, 0.7],
+        [2300, 0.5],
+      ]) {
+        let o = t.createBufferSource();
+        o.buffer = a;
+        let s = t.createBiquadFilter();
+        ((s.type = `bandpass`), (s.frequency.value = e), (s.Q.value = 3.5));
+        let c = t.createGain();
+        (c.gain.setValueAtTime(i * r, n),
+          c.gain.exponentialRampToValueAtTime(0.001, n + 0.25 + 0.4 * r),
+          o.connect(s),
+          s.connect(c),
+          c.connect(this.master),
+          o.start(n));
+      }
+    }
     crash() {
       if (!this.ctx || !this.master) return;
       let e = this.ctx,
@@ -5211,9 +5241,15 @@ var ki = 3.5,
           active: this.mode === `police` && this.police.active,
         },
         particles: this.particles,
+        runId: this.runId,
+        railHit: this.railHit,
       };
     }
     debugSim(e) {}
+    runId = 0;
+    railHit = null;
+    railHitId = 0;
+    bumperSide = 0;
     setMode(e) {
       this.mode = e;
     }
@@ -5322,6 +5358,9 @@ var ki = 3.5,
         (this.crashT = 0),
         (this.shake = 0),
         (this.flash = 0),
+        (this.runId += 1),
+        (this.railHit = null),
+        (this.bumperSide = 0),
         (this.gameOverOutcome = `crash`),
         (this.nextSpawnZ = this.threeD ? 290 : (this.baseY + 260) / this.k),
         (this.boostEnergy = 100),
@@ -5385,6 +5424,12 @@ var ki = 3.5,
         n = this.input,
         r = this.roadX + 10 + t.w * 0.4,
         i = this.roadX + this.roadW - 10 - t.w * 0.4;
+      // 3D: the car can use the shoulder right up to the guardrail.
+      if (this.threeD) {
+        let e = this.roadX + this.roadW / 2,
+          n = GUARDRAIL_LIMIT * (this.laneW / 3.6);
+        ((r = e - n), (i = e + n));
+      }
       if (
         (n.horn && !this.hornActive
           ? ((this.hornActive = !0),
@@ -5476,7 +5521,29 @@ var ki = 3.5,
           !n.brake && e > 0.18 && this.audio?.setTireScreech(e * 0.7);
         }
         if (t.x < r || t.x > i) {
-          let n = t.x < r ? -1 : 1;
+          let n = t.x < r ? -1 : 1,
+            railHit = this.threeD
+              ? railImpact((n * t.vx) / (this.laneW / 3.6), t.speed)
+              : 0;
+          if (railHit > 0) {
+            // Real impact with the guardrail: dents, flying parts, lost speed.
+            ((this.railHit = { id: ++this.railHitId, side: n, severity: railHit }),
+              railHit >= BUMPER_HANGS_AT &&
+                !this.bumperSide &&
+                (this.bumperSide = n),
+              (t.speed *= 1 - 0.3 * railHit),
+              (this.shake = Math.max(this.shake, 4 + 12 * railHit)),
+              (this.flash = Math.max(this.flash, 0.25 * railHit)),
+              this.emitSparks(
+                t.x + n * t.w * 0.45,
+                this.baseY - t.h * 0.2,
+                Math.round(8 + 22 * railHit),
+                n,
+              ),
+              this.audio?.railHit?.(railHit));
+            (t.x = $(t.x, r, i));
+            t.vx = -t.vx * (0.25 + 0.2 * railHit);
+          } else
           ((t.x = $(t.x, r, i)),
             t.speed > 20 &&
               l === n &&
@@ -5490,6 +5557,13 @@ var ki = 3.5,
               (this.shake = Math.max(this.shake, 2.5))),
             (t.vx = 0));
         }
+        if (this.bumperSide && t.speed > 40 && Math.random() < e * 14)
+          this.emitSparks(
+            t.x + this.bumperSide * t.w * 0.42,
+            this.baseY - t.h * 0.46,
+            1,
+            this.bumperSide,
+          );
       } else if (this.phase === `busted`)
         ((t.speed = Math.max(0, t.speed - 150 * e)),
           (t.rot *= Math.exp(-6 * e)),

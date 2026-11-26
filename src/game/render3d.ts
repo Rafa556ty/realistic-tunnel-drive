@@ -102,6 +102,7 @@ import {
   loadGraphicsLevel,
 } from "./graphics-quality";
 import { buildQuadLeds, ledGlow } from "./chiron-lights";
+import { CarDamage } from "./car-damage";
 import { createCity, createTrees } from "./scenery";
 import {
   BRIDGE_END,
@@ -1582,7 +1583,8 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         await this.renderer.compileAsync(n, this.camera, this.scene);
       } catch {}
       if (this.disposed || t !== this.playerLoad) return;
-      (this.player?.removeFromParent(),
+      (this.damage?.repair(),
+        this.player?.removeFromParent(),
         this.playerShadow?.removeFromParent(),
         this.sunShadow?.removeFromParent(),
         (this.playerTail = []),
@@ -1659,6 +1661,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.player = e),
         (this.quadLeds = this.makeQuadLeds(e)),
         this.scene.add(e),
+        this.attachDamage(e),
         (this.canvas.dataset.playerCar = `chiron`));
     }
     makeQuadLeds(e) {
@@ -2505,7 +2508,15 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
         (this.wingBaseY = this.wing?.position.y ?? 0.96),
         (this.wingRise = this.playerKey === `revuelto` ? It : 0.17),
         (this.quadLeds = this.makeQuadLeds(n)),
-        this.scene.add(n));
+        this.scene.add(n),
+        this.attachDamage(n));
+    }
+    attachDamage(e) {
+      try {
+        ((this.damage ??= new CarDamage(this.scene)), this.damage.attach(e));
+      } catch (e) {
+        console.warn(`car damage`, e);
+      }
     }
     setupRealLamps(t, n) {
       let r = { head: [], tail: [] };
@@ -2907,7 +2918,8 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
             (this.sunShadow.rotation.z = e.player.rot),
             (this.sunShadow.material.opacity = t.strength));
         }
-        ((t.rotation.y = -e.player.rot),
+        (this.damage?.update(e.runId ?? 0, e.railHit, o, e.player.speed, n),
+          (t.rotation.y = -e.player.rot),
           (this.body = Ye(
             this.body,
             e.player.rot,
@@ -3525,6 +3537,7 @@ var $ = { x: 0.275, y: 0.68, z: 2.37 },
       );
     }
     dispose() {
+      this.damage?.dispose();
       ((this.disposed = !0),
         this.reflectionMaps?.day.dispose(),
         this.reflectionMaps?.night.dispose(),

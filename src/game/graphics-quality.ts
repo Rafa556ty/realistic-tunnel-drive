@@ -24,7 +24,7 @@ export const GRAPHICS_LEVELS: readonly GraphicsLevel[] = [
   "medium",
   "best",
 ];
-export const GRAPHICS_STORAGE_KEY = "gfx-quality";
+export const GRAPHICS_STORAGE_KEY = "gfx-quality-v2";
 export const GRAPHICS_EVENT = "gfx-quality-change";
 
 export interface GraphicsProfile {
@@ -93,9 +93,9 @@ export const GRAPHICS_PROFILES: Record<GraphicsLevel, GraphicsProfile> = {
 export const isGraphicsLevel = (v: unknown): v is GraphicsLevel =>
   typeof v === "string" && (GRAPHICS_LEVELS as readonly string[]).includes(v);
 
-/** Weak phones keep today's graphics unless the player picks otherwise. */
+/** Everyone starts on the original look; the richer levels are opt-in. */
 export const defaultGraphicsLevel = (lowDevice: boolean): GraphicsLevel =>
-  lowDevice ? "original" : "best";
+  "original";
 
 type ReadStorage = Pick<Storage, "getItem">;
 type WriteStorage = Pick<Storage, "setItem">;
